@@ -1,3 +1,4 @@
+//separate variable structures out, so we can use strlen on
 
 struct DNSHeader {
     /*unsigned short for 16bit, unsigned char for variable bit*/
