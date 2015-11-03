@@ -62,6 +62,9 @@ void readDNSResponse(unsigned char* buffer, unsigned char* questionName){
     }
 
 }
+unsigned char*readName(){
+
+}
 // ***************************************************************************
 // * Main
 // ***************************************************************************
