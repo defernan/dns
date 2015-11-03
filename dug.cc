@@ -4,6 +4,8 @@
 #define MAX_MESSAGE_SIZE 512//65535 //2^16-1
 #define DNS_PORT 53
 #define NULL_CHAR_SIZE 1
+#define POINTER 192 //1100 0000 
+#define POINTER_OFFSET 49152 //1100 0000 0000 0000
 #define DEBUG 1 
 
 //fill in header
@@ -64,9 +66,13 @@ void readDNSResponse(unsigned char* buffer, unsigned char* questionName){
 }
 unsigned char*readName(unsigned char* buffer, unsigned char* response){
     //1100 0000 = 192
+
     //1100 0000 0000 0000= 49152
     while(*response != 0x00){
-        
+        //look for pointer
+        if(*response >= POINTER){
+
+        }
     }
 
 }
