@@ -62,7 +62,12 @@ void readDNSResponse(unsigned char* buffer, unsigned char* questionName){
     }
 
 }
-unsigned char*readName(){
+unsigned char*readName(unsigned char* buffer, unsigned char* response){
+    //1100 0000 = 192
+    //1100 0000 0000 0000= 49152
+    while(*response != 0x00){
+        
+    }
 
 }
 // ***************************************************************************
