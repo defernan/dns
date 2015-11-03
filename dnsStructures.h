@@ -19,10 +19,13 @@ struct DNSHeader {
     unsigned short arCount;//num additional resources
 };
 
-struct DNSQuery {
-    unsigned char* name;
+struct DNSQueryInfo{
     unsigned short qtype;
     unsigned short qclass;
+};
+struct DNSQuery{
+    unsigned char* name;
+    DNSQueryInfo* info;
 };
 
 struct DNSResourceRecord{

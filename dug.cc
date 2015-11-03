@@ -1,8 +1,9 @@
 #include "includes.h"
 
 #define MAXLINE 1024
-#define MAX_MESSAGE_SIZE 65535 //2^16-1
+#define MAX_MESSAGE_SIZE 512//65535 //2^16-1
 #define DNS_PORT 53
+#define NULL_CHAR_SIZE 1
 #define DEBUG 1 
 
 //fill in header
@@ -21,16 +22,18 @@ void fillDNSHeader( DNSHeader* header ){
     header->nsCount = 0;
     header->arCount = 0;
 }
-void convertHostToDNSFormat(unsigned char* host, unsigned char* dnsHost){
+
+//writes in query name to buffer in correct format ie 7imagine5mines3edu
+void writeHostToDNSBuffer(unsigned char* host, unsigned char* buffer){
     int pos = 0;
     int counter = 0;
     int length = strlen((char*)host);
     for(int i = 0; i < length + 1; i++){
         if(host[i] == '.' || i == length ){
            //converts int to char
-           *dnsHost++ = counter + '0'; 
+           *buffer++ = counter; 
            for( int j = pos; j < i; j++){
-               *dnsHost++ = host[j]; 
+               *buffer++ = host[j]; 
            }
            pos = i + 1;
            counter = 0;
@@ -39,7 +42,25 @@ void convertHostToDNSFormat(unsigned char* host, unsigned char* dnsHost){
         }
     }
     //null terminate
-    *dnsHost++ = '\0';
+    *buffer++ = 0x00;
+}
+void readDNSResponse(unsigned char* buffer, unsigned char* questionName){
+    DNSHeader* header;
+    DNSQuery* query;
+    unsigned char* response;
+    
+    header = (DNSHeader*)buffer;
+    response = &buffer[ sizeof(DNSHeader) + strlen((const char*)questionName) + NULL_CHAR_SIZE + sizeof(DNSQueryInfo) ];
+    
+    cout << ntohs(header->qdCount) << " questions\n";
+    cout << ntohs(header->anCount) << " answers\n";
+    cout << ntohs(header->nsCount) << " ns\n";
+    cout << ntohs(header->arCount) << " addln\n";
+    
+    for(int i = 0; i < ntohs(header->qdCount); i++){
+        
+    }
+
 }
 // ***************************************************************************
 // * Main
@@ -50,19 +71,20 @@ int main(int argc, char **argv) {
     const char* serverIP = argv[2];
     unsigned char buffer[MAX_MESSAGE_SIZE]; 
     unsigned char dnsHost[100];
-    
+    unsigned char* questionName;
+
     //dns struct
     DNSHeader* dnsHeader = (DNSHeader*)&buffer;
     //populate dns header info
     fillDNSHeader(dnsHeader);
     //move to buffer spot after header info
-    DNSQuery* query = (DNSQuery*)&buffer[sizeof(DNSHeader) ];
+    questionName = (unsigned char*)&buffer[sizeof(DNSHeader)];
+    writeHostToDNSBuffer(host, questionName);
+    DNSQueryInfo* queryInfo = (DNSQueryInfo*)&buffer[sizeof(DNSHeader) + strlen((const char*)questionName) + NULL_CHAR_SIZE ]; //+1 for null char
     //populate query field 
-    convertHostToDNSFormat(host, dnsHost);
-    query->name = dnsHost;  
-    query->qtype = htons(1); //A type
-    query->qclass = htons(1); //1 for internet
-    //printf("/%s/",query->name); 
+    queryInfo->qtype = htons(1); //A type
+    queryInfo->qclass = htons(1); //1 for internet
+    //printf("/%s/",qname); 
     if (argc != 3) {
             cout << "useage " << argv[0] << endl;
             exit(-1);
@@ -80,7 +102,6 @@ int main(int argc, char **argv) {
     * Set up server address to send to
     ****************************/
     struct sockaddr_in	servaddr;
-    
     // Zero the whole thing.
     bzero(&servaddr, sizeof(servaddr));
     // IPv4 Protocol Family
@@ -91,17 +112,20 @@ int main(int argc, char **argv) {
     servaddr.sin_port = htons(DNS_PORT);
     
     //MAKE SEND CALL
-    if(sendto(clientSock, (char*)buffer, sizeof(DNSHeader) + sizeof(DNSQuery), 0, (sockaddr*)&servaddr, sizeof(servaddr)) < 0){
+    if(sendto(clientSock, (char*)buffer, sizeof(DNSHeader) + sizeof(DNSQueryInfo)  + strlen((const char*)questionName) + NULL_CHAR_SIZE, 0, (sockaddr*)&servaddr, sizeof(servaddr)) < 0){
         cout << "Error sending" << endl;
         exit(-1);
     }
     
     //MAKE RCV CALL
     int size_of_serv_addr = sizeof(servaddr);
-    /*if(recvfrom(clientSock, (char*)buffer, MAX_MESSAGE_SIZE, 0, (sockaddr*)&servaddr, (socklen_t*)&size_of_serv_addr) < 0){
+    if(recvfrom(clientSock, (char*)buffer, MAX_MESSAGE_SIZE, 0, (sockaddr*)&servaddr, (socklen_t*)&size_of_serv_addr) < 0){
         cout << "Error receiving." << endl;
         exit(-1);
-    }*/
+    }
+
+    //Read 
+    readDNSResponse(buffer, questionName);
     //cout << buffer; 
     /**************************************************************************
     * HERE DOWN USE FOR DAEMONIZE REFERENCE
