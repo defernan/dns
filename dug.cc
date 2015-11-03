@@ -46,13 +46,28 @@ void writeHostToDNSBuffer(unsigned char* host, unsigned char* buffer){
     //null terminate
     *buffer++ = 0x00;
 }
+//convert name to readable format ie 7imagine5mines3edu => imagine.mines.edu
+//FIX
+/*void convertHostDNSToNormal(unsigned char* dnsHost){
+    unsigned int counter;
+    int length = strlen((const char*)dnsHost);
+    for(int i = 0; i < length; i++){
+        counter = dnsHost[i];
+        for(int j = i; j < (int)counter; j++){
+            dnsHost[j] = dnsHost[j+1];
+        }
+        //takes counter to next number after i increments
+        i += counter;
+    }
+
+}*/
 void readDNSResponse(unsigned char* buffer, unsigned char* questionName){
     DNSHeader* header;
     DNSQuery* query;
-    unsigned char* response;
+    unsigned char* parser;
     
     header = (DNSHeader*)buffer;
-    response = &buffer[ sizeof(DNSHeader) + strlen((const char*)questionName) + NULL_CHAR_SIZE + sizeof(DNSQueryInfo) ];
+    parser = &buffer[ sizeof(DNSHeader) + strlen((const char*)questionName) + NULL_CHAR_SIZE + sizeof(DNSQueryInfo) ];
     
     cout << ntohs(header->qdCount) << " questions\n";
     cout << ntohs(header->anCount) << " answers\n";
@@ -64,14 +79,16 @@ void readDNSResponse(unsigned char* buffer, unsigned char* questionName){
     }
 
 }
-unsigned char*readName(unsigned char* buffer, unsigned char* response){
-    //1100 0000 = 192
-
-    //1100 0000 0000 0000= 49152
-    while(*response != 0x00){
+unsigned char*readName(unsigned char* buffer, unsigned char* parser){
+    //break when end of name
+    while(*parser != 0x00){
         //look for pointer
-        if(*response >= POINTER){
-
+        if(*parser >= POINTER){
+            /********************
+             * offset = octet1 + octet2 => 256 * octet1 in order to represent as first octet value
+             ********************/
+            offset = (*parser)*256 + *(parser+1) - POINTER_OFFSET;
+            parser = buffer+ offset; 
         }
     }
 
