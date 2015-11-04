@@ -46,20 +46,16 @@ void writeHostToDNSBuffer(unsigned char* host, unsigned char* buffer){
 }
 //convert name to readable format ie 7imagine5mines3edu => imagine.mines.edu
 void convertDNSHostToNormal(unsigned char* dnsHost){
-    unsigned int counter;
-    unsigned int pos;
-    int length = strlen((const char*)dnsHost);
-    for(pos = 0; pos < length; pos++){
+    int counter;
+    int pos;
+    int length = (int)strlen((const char*)dnsHost);
+    for(pos = 0; pos < (int)strlen((const char*)dnsHost); pos++){
         counter = dnsHost[pos];
-        for(int j = pos; j <= (pos + (int)counter); j++){
-            if(j == ((int)counter + pos) ){
-                dnsHost[j] = '.';
-            }else{
-                dnsHost[j] = dnsHost[j+1];
-            }
+        for(int j = 0; j < (int)counter; j++){
+            dnsHost[pos] = dnsHost[pos+1];
+            pos+= 1;
         }
-        //takes counter to next number after i increments
-        pos += counter;
+        dnsHost[pos] = '.';
     }
     //get rid of last .
     dnsHost[pos-1] = 0x00;
@@ -67,7 +63,7 @@ void convertDNSHostToNormal(unsigned char* dnsHost){
 
 unsigned char* readName(unsigned char* buffer, unsigned char* parser, int* octetsMoved){
     unsigned int offset;
-    unsigned char* name = (unsigned char*)malloc(256);;
+    unsigned char* name = (unsigned char*)malloc(256);
     *octetsMoved = 1;
     int counter = 0;
     bool movedToPointer = false;
@@ -94,122 +90,99 @@ unsigned char* readName(unsigned char* buffer, unsigned char* parser, int* octet
     convertDNSHostToNormal(name);
     return name;
 }
+//return parser so i can keep my location
+unsigned char* populateResourceRecord(unsigned char* buffer, unsigned char* parser, DNSResourceRecord &record){
+    int octetsMoved;
+
+    record.name=readName(buffer, parser, &octetsMoved);
+    parser += octetsMoved;
+
+    record.resourceInfo=(DNSResourceInfo*)parser;
+    parser += sizeof(DNSResourceInfo);
+    cout << record.name;
+    //a type 
+    if(ntohs(record.resourceInfo->type) == 1 ){
+        record.rdata = (unsigned char*)malloc(ntohs(record.resourceInfo->rdLength));
+        for(int i = 0; i < ntohs(record.resourceInfo->rdLength); i++){
+            record.rdata[i]=parser[i];
+
+        }
+        record.rdata[ntohs(record.resourceInfo->rdLength)] = 0x00;
+        parser+=ntohs(record.resourceInfo->rdLength);
+
+        struct sockaddr_in a;
+        long *p;
+        p=(long*)record.rdata;
+        a.sin_addr.s_addr=(*p); //working without ntohl
+        printf(" has IPv4 address : %s\n",inet_ntoa(a.sin_addr));
+
+    }
+    else if(ntohs(record.resourceInfo->type) == 5 || ntohs(record.resourceInfo->type) == 2){//cname or ns
+        record.rdata=readName(buffer, parser, &octetsMoved);
+        parser += octetsMoved;
+        if( ntohs(record.resourceInfo->type) == 5) cout << " CName " << record.rdata << endl;
+        else if(ntohs(record.resourceInfo->type) == 2) cout << " NSName " << record.rdata << endl;
+    }else{
+        cout << "IPv6 or unknown record type";
+        record.rdata = (unsigned char*)malloc(ntohs(record.resourceInfo->rdLength));
+        for(int i = 0; i < ntohs(record.resourceInfo->rdLength); i++){
+            record.rdata[i]=parser[i];
+        }
+        record.rdata[ntohs(record.resourceInfo->rdLength)] = 0x00;
+        parser+=ntohs(record.resourceInfo->rdLength);
+
+        struct sockaddr_in a;
+        long *p;
+        p=(long*)record.rdata;
+        a.sin_addr.s_addr=(*p); //working without ntohl
+        printf(" has IPv6 or other address : %s\n",inet_ntoa(a.sin_addr));
+    }
+    return parser;
+}
 void readDNSResponse(unsigned char* buffer, unsigned char* questionName){
     DNSHeader* header;
     DNSQuery* query;
     unsigned char* parser;
-    int octetsMoved;
     
     header = (DNSHeader*)buffer;
     parser = &buffer[ sizeof(DNSHeader) + strlen((const char*)questionName) + NULL_CHAR_SIZE + sizeof(DNSQueryInfo) ];
     vector<DNSResourceRecord> answers, auth, addl;
     cout << ntohs(header->qdCount) << " questions\n";
-    //IF A RETURN, else RECURSIVELYSEARCH
+    //IF A RETURN, else RECURSIVELY SEARCH
     if( ntohs(header->anCount) > 0 ){
         //answers
         cout <<  ntohs(header->anCount) << " ANSWERS\n";
         for(int i = 0; i < ntohs(header->anCount); i++){
             DNSResourceRecord record;
-            record.name = readName(buffer, parser, &octetsMoved);
-            parser += octetsMoved;
-            unsigned char* lname =  record.name; 
-            cout << "Name " << lname << endl;
-            record.resourceInfo = (DNSResourceInfo*)parser; 
-            //cout << "\nRES " << sizeof(DNSResourceInfo) << endl; 
-            parser+= sizeof(DNSResourceInfo);
-            //if type A 
-            //cout << ntohs(record.resourceInfo->type);
-            if(ntohs(record.resourceInfo->type) == 1){
-                record.rdata = (unsigned char*)malloc(ntohs(record.resourceInfo->rdLength));
-                for(int j = 0; j < ntohs(record.resourceInfo->rdLength); j++){
-                    record.rdata[j] = parser[j];
-                }
-                record.rdata[ntohs(record.resourceInfo->rdLength)] = 0x00;
-                parser += ntohs(record.resourceInfo->rdLength);
-                //used for printing 
-                struct sockaddr_in a;
-                long *p;
-                p=(long*)record.rdata;
-                a.sin_addr.s_addr=(*p); //working without ntohl
-                printf("has IPv4 address : %s\n",inet_ntoa(a.sin_addr));
-
-            }else{// if CName
-                record.rdata = readName(buffer, parser, &octetsMoved);
-                parser += octetsMoved;
-                cout << "CName " << record.rdata << endl;
+            parser = populateResourceRecord(buffer, parser, record);
+            if(ntohs(record.resourceInfo->type) == 1 || ntohs(record.resourceInfo->type) == 5 ){
+                answers.push_back(record);
             }
-            cout << endl;
-            answers.push_back(record);
         }
-    }else if( ntohs(header->nsCount) ) { 
+        //print answers return
+        
+        return; 
+    }else if( ntohs(header->nsCount) > 0 ) { 
         cout << ntohs(header->nsCount) <<  " NS\n";
         for(int i = 0; i < ntohs(header->nsCount); i++){
             DNSResourceRecord record;
-            record.name = readName(buffer, parser, &octetsMoved);
-            parser += octetsMoved;
-
-            record.resourceInfo = (DNSResourceInfo*)parser;
-            parser+= sizeof(DNSResourceInfo);
-
-            record.rdata = readName(buffer, parser, &octetsMoved);
-            parser+= octetsMoved;
-            cout << "NS name  " << record.rdata << endl;
-            auth.push_back(record);
+            parser = populateResourceRecord(buffer, parser, record);
+            if(ntohs(record.resourceInfo->type) == 2){
+                auth.push_back(record);
+            }
+        
         }
 
         cout << ntohs(header->arCount) << " addln\n";
         for(int i = 0; i < ntohs(header->arCount); i++){
             DNSResourceRecord record;
-
-            record.name=readName(buffer, parser, &octetsMoved);
-            parser += octetsMoved;
-
-            record.resourceInfo=(DNSResourceInfo*)parser;
-            parser += sizeof(DNSResourceInfo);
-            cout << record.name;
-            
-            if(ntohs(record.resourceInfo->type) == 1 ){
-                record.rdata = (unsigned char*)malloc(ntohs(record.resourceInfo->rdLength));
-                for(int i = 0; i < ntohs(record.resourceInfo->rdLength); i++){
-                    record.rdata[i]=parser[i];
-
-                }
-                record.rdata[ntohs(record.resourceInfo->rdLength)] = 0x00;
-                parser+=ntohs(record.resourceInfo->rdLength);
-
-                struct sockaddr_in a;
-                long *p;
-                p=(long*)record.rdata;
-                a.sin_addr.s_addr=(*p); //working without ntohl
-                printf(" has IPv4 address : %s\n",inet_ntoa(a.sin_addr));
-
+            parser = populateResourceRecord(buffer, parser, record);
+            if(ntohs(record.resourceInfo->type) == 1){
                 addl.push_back(record);
             }
-            else{
-                /*cout << "IM GETTING CALLED";
-                record.rdata=readName(buffer, parser, &octetsMoved);
-                parser += octetsMoved;*/
-                cout << "IM GETTING CALLED";
-                record.rdata = (unsigned char*)malloc(ntohs(record.resourceInfo->rdLength));
-                for(int i = 0; i < ntohs(record.resourceInfo->rdLength); i++){
-                    record.rdata[i]=parser[i];
-
-                }
-                record.rdata[ntohs(record.resourceInfo->rdLength)] = 0x00;
-                parser+=ntohs(record.resourceInfo->rdLength);
-
-                struct sockaddr_in a;
-                long *p;
-                p=(long*)record.rdata;
-                a.sin_addr.s_addr=(*p); //working without ntohl
-                printf(" has IPv6 or other address : %s\n",inet_ntoa(a.sin_addr));
-
-
-            }
-
         }
+        //recursively search
     }else{
-
         cout << "NO ANSWERS\n";
     }
     return;
