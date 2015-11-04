@@ -8,6 +8,7 @@
 
 #include <iostream> //input/output
 #include <string>
+#include <vector>
 //#include <set>
 
 //#include <sys/stat.h> //stat function

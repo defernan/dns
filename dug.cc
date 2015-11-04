@@ -23,7 +23,6 @@ void fillDNSHeader( DNSHeader* header ){
     header->nsCount = 0;
     header->arCount = 0;
 }
-
 //writes in query name to buffer in correct format ie 7imagine5mines3edu
 void writeHostToDNSBuffer(unsigned char* host, unsigned char* buffer){
     int pos = 0;
@@ -52,8 +51,8 @@ void convertDNSHostToNormal(unsigned char* dnsHost){
     int length = strlen((const char*)dnsHost);
     for(pos = 0; pos < length; pos++){
         counter = dnsHost[pos];
-        for(int j = pos; j <= (int)counter; j++){
-            if(j == (int) counter){
+        for(int j = pos; j <= (pos + (int)counter); j++){
+            if(j == ((int)counter + pos) ){
                 dnsHost[j] = '.';
             }else{
                 dnsHost[j] = dnsHost[j+1];
@@ -63,15 +62,14 @@ void convertDNSHostToNormal(unsigned char* dnsHost){
         pos += counter;
     }
     //get rid of last .
-    dnsHost[pos] = 0x00;
-
+    dnsHost[pos-1] = 0x00;
 }
 
-void readName(unsigned char* buffer, unsigned char* parser, unsigned char* name, int* octetsMoved){
+unsigned char* readName(unsigned char* buffer, unsigned char* parser, int* octetsMoved){
     unsigned int offset;
+    unsigned char* name = (unsigned char*)malloc(256);;
     *octetsMoved = 1;
     int counter = 0;
-    //unsigned char* name;
     bool movedToPointer = false;
     //break when end of name
     while(*parser != 0x00){
@@ -88,12 +86,13 @@ void readName(unsigned char* buffer, unsigned char* parser, unsigned char* name,
            counter++;
         }
         parser++;
-        if(!movedToPointer) *octetsMoved++;
+        if(!movedToPointer) (*octetsMoved)++;
     }
-    if(movedToPointer) *octetsMoved++;
+    if(movedToPointer) (*octetsMoved)++;
     //null terminate
     name[counter] = 0x00;
-    convertDNSHostToNormal(name);    
+    convertDNSHostToNormal(name);
+    return name;
 }
 void readDNSResponse(unsigned char* buffer, unsigned char* questionName){
     DNSHeader* header;
@@ -103,37 +102,52 @@ void readDNSResponse(unsigned char* buffer, unsigned char* questionName){
     
     header = (DNSHeader*)buffer;
     parser = &buffer[ sizeof(DNSHeader) + strlen((const char*)questionName) + NULL_CHAR_SIZE + sizeof(DNSQueryInfo) ];
-    
+    vector<DNSResourceRecord> answers;
     cout << ntohs(header->qdCount) << " questions\n";
     cout << ntohs(header->anCount) << " answers\n";
     cout << ntohs(header->nsCount) << " ns\n";
     cout << ntohs(header->arCount) << " addln\n";
     
     //answers
-    for(int i = 0; i < ntohs(header->qdCount); i++){
-        unsigned char* location = parser;
-        unsigned char name[100];
-        readName(buffer, parser, name, &octetsMoved);
-        if(location == parser) cout << "address unchanged\n";
-        unsigned char* lname =  name; 
-        cout << lname;
+    for(int i = 0; i < ntohs(header->anCount); i++){
+        DNSResourceRecord record;
+        record.name = readName(buffer, parser, &octetsMoved);
+        parser += octetsMoved;
+        unsigned char* lname =  record.name; 
+        cout << "Name " << lname << endl;
+        record.resourceInfo = (DNSResourceInfo*)parser; 
+        //cout << "\nRES " << sizeof(DNSResourceInfo) << endl; 
+        parser+= sizeof(DNSResourceInfo);
+        //if type A 
+        //cout << ntohs(record.resourceInfo->type);
+        if(ntohs(record.resourceInfo->type) == 1){
+            record.rdata = (unsigned char*)malloc(ntohs(record.resourceInfo->rdLength));
+            for(int j = 0; j < ntohs(record.resourceInfo->rdLength); j++){
+                record.rdata[j] = parser[j];
+            }
+            record.rdata[ntohs(record.resourceInfo->rdLength)] = 0x00;
+            parser += ntohs(record.resourceInfo->rdLength);
+            //used for printing 
+            struct sockaddr_in a;
+            long *p;
+            p=(long*)record.rdata;
+            a.sin_addr.s_addr=(*p); //working without ntohl
+            printf("has IPv4 address : %s\n",inet_ntoa(a.sin_addr));
+
+        }else{// if CName
+            record.rdata = readName(buffer, parser, &octetsMoved);
+            parser += octetsMoved;
+            unsigned char* n = record.rdata;
+            cout << "CName " << n << endl;
+        }
+        cout << endl;
     }
 
 }
-void makeDnsQuery(unsigned char* hostname, char* serverIP){
-
-}
-// ***************************************************************************
-// * Main
-// ***************************************************************************
-int main(int argc, char **argv) {
-    
-    unsigned char* host = (unsigned char*)argv[1];
-    const char* serverIP = argv[2];
+void makeDNSQuery(unsigned char* host, const char* serverIP, int clientSocket){
     unsigned char buffer[MAX_MESSAGE_SIZE]; 
-    unsigned char dnsHost[100];
     unsigned char* questionName;
-
+    
     //dns struct
     DNSHeader* dnsHeader = (DNSHeader*)&buffer;
     //populate dns header info
@@ -145,20 +159,7 @@ int main(int argc, char **argv) {
     //populate query field 
     queryInfo->qtype = htons(1); //A type
     queryInfo->qclass = htons(1); //1 for internet
-    //printf("/%s/",qname); 
-    if (argc != 3) {
-            cout << "useage " << argv[0] << endl;
-            exit(-1);
-    }
-    
-    //client socket	
-    int clientSock = -1;
-    if( (clientSock = socket(AF_INET, SOCK_DGRAM, 0)) < 0){
-        cout << "Failed to create listening socket " << strerror(errno) << endl;
-        exit(-1);
-    }
-    
-      
+
     /***************************
     * Set up server address to send to
     ****************************/
@@ -173,20 +174,44 @@ int main(int argc, char **argv) {
     servaddr.sin_port = htons(DNS_PORT);
     
     //MAKE SEND CALL
-    if(sendto(clientSock, (char*)buffer, sizeof(DNSHeader) + sizeof(DNSQueryInfo)  + strlen((const char*)questionName) + NULL_CHAR_SIZE, 0, (sockaddr*)&servaddr, sizeof(servaddr)) < 0){
+    if(sendto(clientSocket, (char*)buffer, sizeof(DNSHeader) + sizeof(DNSQueryInfo)  + strlen((const char*)questionName) + NULL_CHAR_SIZE, 0, (sockaddr*)&servaddr, sizeof(servaddr)) < 0){
         cout << "Error sending" << endl;
         exit(-1);
     }
     
     //MAKE RCV CALL
     int size_of_serv_addr = sizeof(servaddr);
-    if(recvfrom(clientSock, (char*)buffer, MAX_MESSAGE_SIZE, 0, (sockaddr*)&servaddr, (socklen_t*)&size_of_serv_addr) < 0){
+    if(recvfrom(clientSocket, (char*)buffer, MAX_MESSAGE_SIZE, 0, (sockaddr*)&servaddr, (socklen_t*)&size_of_serv_addr) < 0){
         cout << "Error receiving." << endl;
         exit(-1);
     }
 
     //Read 
     readDNSResponse(buffer, questionName);
+
+}
+// ***************************************************************************
+// * Main
+// ***************************************************************************
+int main(int argc, char **argv) {
+    
+    unsigned char* host = (unsigned char*)argv[1];
+    const char* serverIP = argv[2];
+
+    if (argc != 3) {
+            cout << "useage " << argv[0] << endl;
+            exit(-1);
+    }
+    
+    //client socket	
+    int clientSocket = -1;
+    if( (clientSocket = socket(AF_INET, SOCK_DGRAM, 0)) < 0){
+        cout << "Failed to create listening socket " << strerror(errno) << endl;
+        exit(-1);
+    }
+    makeDNSQuery(host, serverIP, clientSocket); 
+    
+    close(clientSocket);
     //cout << buffer; 
     /**************************************************************************
     * HERE DOWN USE FOR DAEMONIZE REFERENCE
@@ -196,8 +221,8 @@ int main(int argc, char **argv) {
 	// * specified in the servaddr structure.  This step is implicit in
 	// * the connect() call, but must be explicitly listed for servers.
 	// ********************************************************************
-	if (DEBUG)
-		cout << "Process has bound fd " << clientSock << " to port " << DNS_PORT << endl;
+	//if (DEBUG)
+	//	cout << "Process has bound fd " << clientSocket << " to port " << DNS_PORT << endl;
      
     /*if (bind(listenfd, (sockaddr *) &servaddr, sizeof(servaddr)) < 0) {
         cout << "bind() failed: " << strerror(errno) << endl;

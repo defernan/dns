@@ -28,15 +28,21 @@ struct DNSQuery{
     unsigned char* name;
     DNSQueryInfo* info;
 };
-
-struct DNSResourceRecord{
-    //variable
-    unsigned char* name;
+//if used unsined int sizeof is 12 instead of 10
+struct DNSResourceInfo{
     //fixed 
     unsigned short type;
     unsigned short class_;
-    unsigned int ttl;
+    //unsigned int ttl;
+    unsigned short ttl1;
+    unsigned short ttl2;
     unsigned short rdLength;
+};
+struct DNSResourceRecord{
+    //variable
+    unsigned char* name;
+    //fixed info
+    DNSResourceInfo* resourceInfo; 
     //variable 
     unsigned char* rdata;
 };
