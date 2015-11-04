@@ -74,13 +74,18 @@ void readDNSResponse(unsigned char* buffer, unsigned char* questionName){
     cout << ntohs(header->nsCount) << " ns\n";
     cout << ntohs(header->arCount) << " addln\n";
     
+    //answers
     for(int i = 0; i < ntohs(header->qdCount); i++){
         
     }
 
 }
-unsigned char*readName(unsigned char* buffer, unsigned char* parser){
+int readName(unsigned char* buffer, unsigned char* parser){
     //break when end of name
+    int offset;
+    int octetsMoved = 1;
+    unsigned char* name;
+    bool movedToPointer = false;
     while(*parser != 0x00){
         //look for pointer
         if(*parser >= POINTER){
@@ -88,9 +93,20 @@ unsigned char*readName(unsigned char* buffer, unsigned char* parser){
              * offset = octet1 + octet2 => 256 * octet1 in order to represent as first octet value
              ********************/
             offset = (*parser)*256 + *(parser+1) - POINTER_OFFSET;
-            parser = buffer+ offset; 
+            parser = buffer + offset;
+            OctetsMoved++;
+            movedToPointer = true;
+        }else{
+           name[counter] = *parser; 
+        }
+        parser++;
+        if(!movedToPointer){
+            octetsMoved++;
         }
     }
+    return OctetsMoved;
+}
+void makeDnsQuery(unsigned char* hostname, char* serverIP){
 
 }
 // ***************************************************************************
