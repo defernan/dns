@@ -84,6 +84,7 @@ int readName(unsigned char* buffer, unsigned char* parser){
     //break when end of name
     int offset;
     int octetsMoved = 1;
+    int counter = 0;
     unsigned char* name;
     bool movedToPointer = false;
     while(*parser != 0x00){
@@ -94,7 +95,7 @@ int readName(unsigned char* buffer, unsigned char* parser){
              ********************/
             offset = (*parser)*256 + *(parser+1) - POINTER_OFFSET;
             parser = buffer + offset;
-            OctetsMoved++;
+            octetsMoved++;
             movedToPointer = true;
         }else{
            name[counter] = *parser; 
@@ -104,7 +105,7 @@ int readName(unsigned char* buffer, unsigned char* parser){
             octetsMoved++;
         }
     }
-    return OctetsMoved;
+    return octetsMoved;
 }
 void makeDnsQuery(unsigned char* hostname, char* serverIP){
 
