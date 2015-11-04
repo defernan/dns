@@ -1,6 +1,5 @@
 #include "includes.h"
 
-#define MAXLINE 1024
 #define MAX_MESSAGE_SIZE 512//65535 //2^16-1
 #define DNS_PORT 53
 #define NULL_CHAR_SIZE 1
@@ -47,24 +46,60 @@ void writeHostToDNSBuffer(unsigned char* host, unsigned char* buffer){
     *buffer++ = 0x00;
 }
 //convert name to readable format ie 7imagine5mines3edu => imagine.mines.edu
-//FIX
-/*void convertHostDNSToNormal(unsigned char* dnsHost){
+void convertDNSHostToNormal(unsigned char* dnsHost){
     unsigned int counter;
+    unsigned int pos;
     int length = strlen((const char*)dnsHost);
-    for(int i = 0; i < length; i++){
-        counter = dnsHost[i];
-        for(int j = i; j < (int)counter; j++){
-            dnsHost[j] = dnsHost[j+1];
+    for(pos = 0; pos < length; pos++){
+        counter = dnsHost[pos];
+        for(int j = pos; j <= (int)counter; j++){
+            if(j == (int) counter){
+                dnsHost[j] = '.';
+            }else{
+                dnsHost[j] = dnsHost[j+1];
+            }
         }
         //takes counter to next number after i increments
-        i += counter;
+        pos += counter;
     }
+    //get rid of last .
+    dnsHost[pos] = 0x00;
 
-}*/
+}
+
+void readName(unsigned char* buffer, unsigned char* parser, unsigned char* name, int* octetsMoved){
+    unsigned int offset;
+    *octetsMoved = 1;
+    int counter = 0;
+    //unsigned char* name;
+    bool movedToPointer = false;
+    //break when end of name
+    while(*parser != 0x00){
+        //look for pointer
+        if(*parser >= POINTER){
+            /********************
+             * offset = octet1 + octet2 => 256 * octet1 in order to represent as first octet value
+             ********************/
+            offset = (*parser)*256 + *(parser+1) - POINTER_OFFSET;
+            parser = buffer + offset - 1;
+            movedToPointer = true;
+        }else{
+           name[counter] = *parser;
+           counter++;
+        }
+        parser++;
+        if(!movedToPointer) *octetsMoved++;
+    }
+    if(movedToPointer) *octetsMoved++;
+    //null terminate
+    name[counter] = 0x00;
+    convertDNSHostToNormal(name);    
+}
 void readDNSResponse(unsigned char* buffer, unsigned char* questionName){
     DNSHeader* header;
     DNSQuery* query;
     unsigned char* parser;
+    int octetsMoved;
     
     header = (DNSHeader*)buffer;
     parser = &buffer[ sizeof(DNSHeader) + strlen((const char*)questionName) + NULL_CHAR_SIZE + sizeof(DNSQueryInfo) ];
@@ -76,36 +111,14 @@ void readDNSResponse(unsigned char* buffer, unsigned char* questionName){
     
     //answers
     for(int i = 0; i < ntohs(header->qdCount); i++){
-        
+        unsigned char* location = parser;
+        unsigned char name[100];
+        readName(buffer, parser, name, &octetsMoved);
+        if(location == parser) cout << "address unchanged\n";
+        unsigned char* lname =  name; 
+        cout << lname;
     }
 
-}
-int readName(unsigned char* buffer, unsigned char* parser){
-    //break when end of name
-    int offset;
-    int octetsMoved = 1;
-    int counter = 0;
-    unsigned char* name;
-    bool movedToPointer = false;
-    while(*parser != 0x00){
-        //look for pointer
-        if(*parser >= POINTER){
-            /********************
-             * offset = octet1 + octet2 => 256 * octet1 in order to represent as first octet value
-             ********************/
-            offset = (*parser)*256 + *(parser+1) - POINTER_OFFSET;
-            parser = buffer + offset;
-            octetsMoved++;
-            movedToPointer = true;
-        }else{
-           name[counter] = *parser; 
-        }
-        parser++;
-        if(!movedToPointer){
-            octetsMoved++;
-        }
-    }
-    return octetsMoved;
 }
 void makeDnsQuery(unsigned char* hostname, char* serverIP){
 
