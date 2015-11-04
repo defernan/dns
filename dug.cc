@@ -158,8 +158,7 @@ void readDNSResponse(unsigned char* buffer, unsigned char* questionName){
         }
 
         cout << ntohs(header->arCount) << " addln\n";
-        //for(int i = 0; i < ntohs(header->arCount); i++){
-        for(int i = 0; i < ntohs(header->nsCount); i++){
+        for(int i = 0; i < ntohs(header->arCount); i++){
             DNSResourceRecord record;
 
             record.name=readName(buffer, parser, &octetsMoved);
@@ -168,7 +167,7 @@ void readDNSResponse(unsigned char* buffer, unsigned char* questionName){
             record.resourceInfo=(DNSResourceInfo*)parser;
             parser += sizeof(DNSResourceInfo);
             cout << record.name;
-
+            
             if(ntohs(record.resourceInfo->type) == 1 ){
                 record.rdata = (unsigned char*)malloc(ntohs(record.resourceInfo->rdLength));
                 for(int i = 0; i < ntohs(record.resourceInfo->rdLength); i++){
@@ -184,14 +183,30 @@ void readDNSResponse(unsigned char* buffer, unsigned char* questionName){
                 a.sin_addr.s_addr=(*p); //working without ntohl
                 printf(" has IPv4 address : %s\n",inet_ntoa(a.sin_addr));
 
+                addl.push_back(record);
             }
             else{
-                cout << "IM GETTING CALLED";
+                /*cout << "IM GETTING CALLED";
                 record.rdata=readName(buffer, parser, &octetsMoved);
-                parser += octetsMoved;
+                parser += octetsMoved;*/
+                cout << "IM GETTING CALLED";
+                record.rdata = (unsigned char*)malloc(ntohs(record.resourceInfo->rdLength));
+                for(int i = 0; i < ntohs(record.resourceInfo->rdLength); i++){
+                    record.rdata[i]=parser[i];
+
+                }
+                record.rdata[ntohs(record.resourceInfo->rdLength)] = 0x00;
+                parser+=ntohs(record.resourceInfo->rdLength);
+
+                struct sockaddr_in a;
+                long *p;
+                p=(long*)record.rdata;
+                a.sin_addr.s_addr=(*p); //working without ntohl
+                printf(" has IPv6 or other address : %s\n",inet_ntoa(a.sin_addr));
+
+
             }
 
-           addl.push_back(record);
         }
     }else{
 
