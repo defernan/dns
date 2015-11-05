@@ -8,7 +8,10 @@
 #define DEBUG 1
 
 bool answerFound = false;
-
+unsigned char* host; 
+int clientSocket = 0;
+//avoid endless searching
+vector<string> serversSearched;
 //fill in dns header
 void fillDNSHeader( DNSHeader* header );
 
@@ -28,13 +31,16 @@ unsigned char* populateResourceRecord(unsigned char* buffer, unsigned char* pars
 void printAnswers(vector<DNSResourceRecord> answers);
 
 //recursively search if no answers found
-void recursivelySearch(vector<DNSResourceRecord> auth, vector<DNSResourceRecord> addl);
+void recursivelySearch(vector<DNSResourceRecord> &auth, vector<DNSResourceRecord> &addl);
+
+//checks if addl record is one of the authority records provided
+bool recordsCorrespond(DNSResourceRecord addl, vector<DNSResourceRecord> &auth);
 
 //read dns response from buffer
 void readDNSResponse(unsigned char* buffer, unsigned char* questionName);
 
 //make a dns query to a server
-void makeDNSQuery(unsigned char* host, const char* serverIP, int clientSocket);
+void makeDNSQuery(unsigned char* host, const char* serverIP);
 
 
 // ***************************************************************************
@@ -42,7 +48,7 @@ void makeDNSQuery(unsigned char* host, const char* serverIP, int clientSocket);
 // ***************************************************************************
 int main(int argc, char **argv) {
     
-    unsigned char* host = (unsigned char*)argv[1];
+    host = (unsigned char*)argv[1];
     const char* serverIP = argv[2];
 
     if (argc != 3) {
@@ -51,13 +57,15 @@ int main(int argc, char **argv) {
     }
     
     //client socket	
-    int clientSocket = -1;
+    clientSocket = -1;
     if( (clientSocket = socket(AF_INET, SOCK_DGRAM, 0)) < 0){
         cout << "Failed to create listening socket " << strerror(errno) << endl;
         exit(-1);
     }
-    makeDNSQuery(host, serverIP, clientSocket); 
-    
+    makeDNSQuery(host, serverIP); 
+    if(!answerFound){
+        cout << "No Answers Found!";
+    }
     close(clientSocket);
     //cout << buffer; 
     /**************************************************************************
@@ -119,7 +127,11 @@ int main(int argc, char **argv) {
 }
 
 //make a dns query to a server
-void makeDNSQuery(unsigned char* host, const char* serverIP, int clientSocket){
+void makeDNSQuery(unsigned char* host, const char* serverIP){
+    cout << "/////////////////////////////////////\n";
+    cout << "Querying " << serverIP << " for " << host << endl;
+    cout << "/////////////////////////////////////\n";
+
     unsigned char buffer[MAX_MESSAGE_SIZE]; 
     unsigned char* questionName;
     
@@ -163,9 +175,7 @@ void makeDNSQuery(unsigned char* host, const char* serverIP, int clientSocket){
 
     //Read 
     readDNSResponse(buffer, questionName);
-    if(!answerFound){
-        cout << "No Answers Found!";
-    }
+    
 
 }
 
@@ -362,19 +372,47 @@ unsigned char* readName(unsigned char* buffer, unsigned char* parser, int* octet
 void printAnswers(vector<DNSResourceRecord> answers){
     cout << "bruh" << endl;
     for(int i = 0; i < answers.size(); i++){
-        //cout << 
+        cout << "answer answer\n";
 
     }
+    cout << endl;
 }
 
 //recursively search if no answers found
-void recursivelySearch(vector<DNSResourceRecord> auth, vector<DNSResourceRecord> addl){
+void recursivelySearch(vector<DNSResourceRecord> &auth, vector<DNSResourceRecord> &addl){
     cout << "recursively searching bruh" << endl;
     
     for(int i = 0; i < addl.size(); i++){
-        if(answerFound) break;        
+        if(answerFound) break;
+        //check if ns record corresponds  to an addl record
+        if( recordsCorrespond(addl[i], auth ) ) {
+            cout << "------------//" <<(addl[i].name)<<"//-------------------------";  
+            struct sockaddr_in a;
+            long *p;
+            p=(long*)addl[i].rdata;
+            a.sin_addr.s_addr=(*p); //working without ntohl
+            const char* serverIP = inet_ntoa(a.sin_addr);  
+            makeDNSQuery( host,  serverIP);
+        }
+
     }
+    //if ns->name == additional->name
+    //makeRequest(host, ip);`
+    //2 server failure
+    //3 invalie name
+    //5 query refused
 
 }
 
-
+//checks if addl record is one of the authority records provided
+bool recordsCorrespond(DNSResourceRecord addl, vector<DNSResourceRecord> &auth){
+     
+    for(int i = 0; i < auth.size(); i++){
+        if((addl.name) == (auth[i].name)){ 
+            cout << "MATHC"; 
+            return true;
+        }
+        return true;
+    }
+    return false;
+}
