@@ -1,4 +1,5 @@
 #include <unistd.h> //ssize_t and other standard stuff
+#include <cstdio> //printf
 #include <sys/socket.h> //socket
 #include <sys/types.h> //pthread
 #include <string.h> //strlen
