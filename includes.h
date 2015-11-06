@@ -10,7 +10,7 @@
 #include <iostream> //input/output
 #include <string>
 #include <vector>
-//#include <set>
+#include <set>
 
 //#include <sys/stat.h> //stat function
 #include <cstdlib> 

@@ -8,10 +8,11 @@
 #define DEBUG 1
 
 bool answerFound = false;
+bool badResponse = false;
 unsigned char* host; 
 int clientSocket = 0;
 //avoid endless searching
-vector<string> serversSearched;
+set<string> serversSearched;
 //fill in dns header
 void fillDNSHeader( DNSHeader* header );
 
@@ -28,7 +29,7 @@ unsigned char* readName(unsigned char* buffer, unsigned char* parser, int* octet
 unsigned char* populateResourceRecord(unsigned char* buffer, unsigned char* parser, DNSResourceRecord &record);
 
 //prints answers
-void printAnswers(vector<DNSResourceRecord> answers);
+void printAnswers(vector<DNSResourceRecord> &answers);
 
 //recursively search if no answers found
 void recursivelySearch(vector<DNSResourceRecord> &auth, vector<DNSResourceRecord> &addl);
@@ -36,12 +37,14 @@ void recursivelySearch(vector<DNSResourceRecord> &auth, vector<DNSResourceRecord
 //checks if addl record is one of the authority records provided
 bool recordsCorrespond(DNSResourceRecord addl, vector<DNSResourceRecord> &auth);
 
+//checks if bad response ie bad domain name server error
+void checkForBadResponse(DNSHeader* header);
+
 //read dns response from buffer
 void readDNSResponse(unsigned char* buffer, unsigned char* questionName);
 
 //make a dns query to a server
 void makeDNSQuery(unsigned char* host, const char* serverIP);
-
 
 // ***************************************************************************
 // * Main
@@ -67,7 +70,6 @@ int main(int argc, char **argv) {
         cout << "No Answers Found!";
     }
     close(clientSocket);
-    //cout << buffer; 
     /**************************************************************************
     * HERE DOWN USE FOR DAEMONIZE REFERENCE
     ***************************************************************************/
@@ -128,10 +130,12 @@ int main(int argc, char **argv) {
 
 //make a dns query to a server
 void makeDNSQuery(unsigned char* host, const char* serverIP){
-    cout << "/////////////////////////////////////\n";
-    cout << "Querying " << serverIP << " for " << host << endl;
-    cout << "/////////////////////////////////////\n";
-
+    //if(badResponse) return; 
+    if(DEBUG){
+        cout << "/////////////////////////////////////\n";
+        cout << "Querying " << serverIP << " for " << host << endl;
+        cout << "/////////////////////////////////////\n";
+    }
     unsigned char buffer[MAX_MESSAGE_SIZE]; 
     unsigned char* questionName;
     
@@ -243,6 +247,10 @@ void readDNSResponse(unsigned char* buffer, unsigned char* questionName){
     
     header = (DNSHeader*)buffer;
     parser = &buffer[ sizeof(DNSHeader) + strlen((const char*)questionName) + NULL_CHAR_SIZE + sizeof(DNSQueryInfo) ];
+    //check response
+    checkForBadResponse(header);
+    if(badResponse) return;
+
     vector<DNSResourceRecord> answers, auth, addl;
     cout << ntohs(header->qdCount) << " questions\n";
     //IF A RETURN, else RECURSIVELY SEARCH
@@ -283,7 +291,19 @@ void readDNSResponse(unsigned char* buffer, unsigned char* questionName){
     }
     return;
 }
-
+//lets response know if bad
+void checkForBadResponse(DNSHeader* header){
+    if((int)header->rcode == 2){
+        badResponse = true; 
+        cout << "Error: " <<  (int)header->rcode << ". Server failed to complete request.\n";
+    }else if((int)header->rcode == 3){
+        badResponse = true;
+        cout << "Error: " <<  (int)header->rcode << ". Domain name does not exist.\n";
+    }else if( (int)header->rcode == 5){
+        badResponse = true;
+        cout << "Error: " <<  (int)header->rcode << ", Server refused to answer.\n"; 
+    }
+}
 //populates a dns resource record
 //return parser so i can keep my location
 unsigned char* populateResourceRecord(unsigned char* buffer, unsigned char* parser, DNSResourceRecord &record){
@@ -294,7 +314,7 @@ unsigned char* populateResourceRecord(unsigned char* buffer, unsigned char* pars
 
     record.resourceInfo=(DNSResourceInfo*)parser;
     parser += sizeof(DNSResourceInfo);
-    cout << record.name;
+    //cout << record.name;
     //a type 
     if(ntohs(record.resourceInfo->type) == 1 ){
         record.rdata = (unsigned char*)malloc(ntohs(record.resourceInfo->rdLength));
@@ -315,7 +335,7 @@ unsigned char* populateResourceRecord(unsigned char* buffer, unsigned char* pars
     else if(ntohs(record.resourceInfo->type) == 5 || ntohs(record.resourceInfo->type) == 2){//cname or ns
         record.rdata=readName(buffer, parser, &octetsMoved);
         parser += octetsMoved;
-        if( ntohs(record.resourceInfo->type) == 5) cout << " CName " << record.rdata << endl;
+        if( ntohs(record.resourceInfo->type) == 5); //cout << " CName " << record.rdata << endl;
         else if(ntohs(record.resourceInfo->type) == 2) cout << " NSName " << record.rdata << endl;
     }else{
         cout << "IPv6 or unknown record type";
@@ -369,10 +389,19 @@ unsigned char* readName(unsigned char* buffer, unsigned char* parser, int* octet
 }
 
 //prints answers
-void printAnswers(vector<DNSResourceRecord> answers){
-    cout << "bruh" << endl;
+void printAnswers(vector<DNSResourceRecord> &answers){
+    cout << "ANSWERS FOR  " << host <<  " ARE...." << endl;
     for(int i = 0; i < answers.size(); i++){
-        cout << "answer answer\n";
+        if(ntohs(answers[i].resourceInfo->type) == 1){
+            struct sockaddr_in a;
+            long *p;
+            p=(long*)answers[i].rdata;
+            a.sin_addr.s_addr=(*p); //working without ntohl
+            const char* serverIP = inet_ntoa(a.sin_addr);
+            cout << "IP: " << serverIP << endl;
+        }else if(ntohs(answers[i].resourceInfo->type) == 5){
+            cout << "CNAME: " << answers[i].rdata << endl;
+        }
 
     }
     cout << endl;
@@ -380,39 +409,23 @@ void printAnswers(vector<DNSResourceRecord> answers){
 
 //recursively search if no answers found
 void recursivelySearch(vector<DNSResourceRecord> &auth, vector<DNSResourceRecord> &addl){
-    cout << "recursively searching bruh" << endl;
-    
+     
     for(int i = 0; i < addl.size(); i++){
         if(answerFound) break;
-        //check if ns record corresponds  to an addl record
-        if( recordsCorrespond(addl[i], auth ) ) {
-            cout << "------------//" <<(addl[i].name)<<"//-------------------------";  
             struct sockaddr_in a;
             long *p;
             p=(long*)addl[i].rdata;
             a.sin_addr.s_addr=(*p); //working without ntohl
-            const char* serverIP = inet_ntoa(a.sin_addr);  
+            const char* serverIP = inet_ntoa(a.sin_addr);
+        //check if already searched ip
+        if( serversSearched.find(serverIP) == serversSearched.end() ) {
+            if(badResponse) return;
+            cout << "------------//" <<(addl[i].name)<<"//-------------------------\n";  
+            serversSearched.insert(serverIP); 
             makeDNSQuery( host,  serverIP);
         }
 
     }
-    //if ns->name == additional->name
-    //makeRequest(host, ip);`
-    //2 server failure
-    //3 invalie name
-    //5 query refused
 
 }
 
-//checks if addl record is one of the authority records provided
-bool recordsCorrespond(DNSResourceRecord addl, vector<DNSResourceRecord> &auth){
-     
-    for(int i = 0; i < auth.size(); i++){
-        if((addl.name) == (auth[i].name)){ 
-            cout << "MATHC"; 
-            return true;
-        }
-        return true;
-    }
-    return false;
-}
