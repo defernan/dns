@@ -220,7 +220,7 @@ void fillDNSHeaderResponse( DNSHeader* header, unsigned short answerCount ){
     header->opcode = 0; //0: standard query 
     header->aa = 0; //not authoritative
     header->tc = 0; //not truncated
-    header->rd = 1; //recursion Desired
+    header->rd = 0; //recursion Desired
     header->ra = 0; //recursion not available 
     header->z = 0;
     header->rcode = 0;
