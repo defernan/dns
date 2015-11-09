@@ -16,6 +16,7 @@ unsigned char* host;
 int clientSocket = 0;
 int dnsSocket = 0;
 unsigned short digID = 0;
+int sizeOfMessage = 0;
 vector<DNSResourceRecord> answers;
 //avoid endless searching
 set<string> serversSearched;
@@ -131,8 +132,8 @@ int main(int argc, char **argv) {
     close(dnsSocket);
     //printAnswers(answers);  
     if(SERVER_MODE){
-        int sizeOfMessage;
-        replyToDIG( sizeOfMessage); 
+        //int sizeOfMessage;
+        //replyToDIG( sizeOfMessage); 
          
         //MAKE SEND CALL
         if(sendto(clientSocket, (char*)digBuffer, sizeOfMessage, 0, (sockaddr*)&servaddr, sizeof(servaddr)) < 0){
@@ -300,7 +301,11 @@ void readDNSResponse(unsigned char* buffer, unsigned char* questionName){
             cout << "Answer is non authoritive\n";
         }
         printAnswers(answers);
-
+        if(SERVER_MODE){
+            //int sizeOfMessage;
+            replyToDIG(sizeOfMessage); 
+         
+        }
     }else if( ntohs(header->nsCount) > 0 ) { 
         for(int i = 0; i < ntohs(header->nsCount); i++){
             DNSResourceRecord record;
@@ -488,18 +493,20 @@ void replyToDIG(int &sizeOfMessage){
         unsigned char* rec = (unsigned char*)&digBuffer[ position ];
         writeHostToDNSBuffer(answers[i].name, rec); 
         position +=  strlen((const char*)rec) + NULL_CHAR_SIZE;
-        digBuffer[position] = 0x00;
-        position += NULL_CHAR_SIZE;
         DNSResourceInfo* recInfo = (DNSResourceInfo*)&digBuffer[ position ];
         recInfo->type = answers[i].resourceInfo->type;
+        recInfo->class_ = answers[i].resourceInfo->class_;
+        recInfo->ttl1 = answers[i].resourceInfo->ttl1;
+        recInfo->ttl2 = answers[i].resourceInfo->ttl2;
+        recInfo->rdLength = answers[i].resourceInfo->rdLength;
         position += sizeof(DNSResourceInfo);
+        //cout << sizeof(DNSResourceInfo);
         int rdataSize;
-        cout << "\n " << ntohs(answers[0].resourceInfo->type)  << " ^^^ bufh " << ntohs(recInfo->rdLength) << "\n"; 
+        //cout << "\n " << ntohs(recInfo->type)  << " ^^^ bufh " << ntohs(recInfo->rdLength) << "\n"; 
         if(ntohs(recInfo->type) == 1){
-            cout <<"atype"; 
             unsigned char* recrdata = (unsigned char*)&digBuffer[position];
-            for(int i = 0; i < ntohs(recInfo->rdLength); i++){
-                recrdata[i]=answers[i].rdata[i];
+            for(int j = 0; j < ntohs(recInfo->rdLength); j++){
+                recrdata[j]=answers[i].rdata[j];
 
             }
             recrdata[ntohs(recInfo->rdLength)] = 0x00;
