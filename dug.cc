@@ -294,6 +294,11 @@ void readDNSResponse(unsigned char* buffer, unsigned char* questionName){
             }
         }
         //print answers return
+        if(header->aa == 1){
+            cout << "Answer is authoritive\n";
+        }else {
+            cout << "Answer is non authoritive\n";
+        }
         printAnswers(answers);
 
     }else if( ntohs(header->nsCount) > 0 ) { 
