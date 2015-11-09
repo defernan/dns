@@ -46,3 +46,6 @@ struct DNSResourceRecord{
     //variable 
     unsigned char* rdata;
 };
+struct DNSVarName{
+    unsigned char* name;
+};

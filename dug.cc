@@ -1,20 +1,27 @@
 #include "includes.h"
 
-#define MAX_MESSAGE_SIZE 512//65535 //2^16-1
+#define MAX_MESSAGE_SIZE 1024//65535 //2^16-1
 #define DNS_PORT 53
+#define PORT 9004
 #define NULL_CHAR_SIZE 1
 #define POINTER 192 //1100 0000 
 #define POINTER_OFFSET 49152 //1100 0000 0000 0000
-#define DEBUG 1
 
+bool DEBUG = false;
+bool SERVER_MODE = false;
 bool answerFound = false;
 bool badResponse = false;
+unsigned char digBuffer[MAX_MESSAGE_SIZE];
 unsigned char* host; 
 int clientSocket = 0;
+int dnsSocket = 0;
+unsigned short digID = 0;
+vector<DNSResourceRecord> answers;
 //avoid endless searching
 set<string> serversSearched;
 //fill in dns header
-void fillDNSHeader( DNSHeader* header );
+void fillDNSHeaderReq( DNSHeader* header );
+void fillDNSHeaderResponse( DNSHeader* header, unsigned short answers );
 
 //writes in query name to buffer in correct format ie 7imagine5mines3edu
 void writeHostToDNSBuffer(unsigned char* host, unsigned char* buffer);
@@ -45,23 +52,75 @@ void readDNSResponse(unsigned char* buffer, unsigned char* questionName);
 
 //make a dns query to a server
 void makeDNSQuery(unsigned char* host, const char* serverIP);
-
+char* readDIGResponse(unsigned char* buffer, unsigned char* serverIP);
+void replyToDIG(int &messageSize);
 // ***************************************************************************
 // * Main
 // ***************************************************************************
 int main(int argc, char **argv) {
     
-    host = (unsigned char*)argv[1];
-    const char* serverIP = argv[2];
-
-    if (argc != 3) {
-            cout << "useage " << argv[0] << endl;
-            exit(-1);
-    }
+    if( string(argv[1]) == "-d" ) DEBUG = true;
+    if( string(argv[1]) == "-f" ) SERVER_MODE = true;
+    const char* serverIP; 
+    struct sockaddr_in  servaddr;
     
-    //client socket	
-    clientSocket = -1;
-    if( (clientSocket = socket(AF_INET, SOCK_DGRAM, 0)) < 0){
+    if(SERVER_MODE){
+        serverIP = argv[2];
+        unsigned char buff[MAX_MESSAGE_SIZE];  
+        //set socket up to listen
+        clientSocket = -1; 
+
+        clientSocket = socket(AF_INET, SOCK_DGRAM, 0);
+        cout << "Process has bound fd " << clientSocket << " to port " << PORT << endl;
+        
+
+        // Zero the whole thing.
+        bzero(&servaddr, sizeof(servaddr));
+        // IPv4 Protocol Family
+        servaddr.sin_family = AF_INET;
+        // Let the system pick the IP address.
+        servaddr.sin_addr.s_addr = htonl(INADDR_ANY);
+        // You pick a random high-numbered port
+        servaddr.sin_port = htons(PORT);
+
+        if (bind(clientSocket, (sockaddr *) &servaddr, sizeof(servaddr)) < 0) {
+            cout << "bind() failed: " << strerror(errno) << endl;
+            exit(-1);
+        }
+
+        /* setsockopt: Handy debugging trick that lets 
+        * us rerun the server immediately after we kill it; 
+        * otherwise we have to wait about 20 secs. 
+        * Eliminates "ERROR on binding: Address already in use" error. 
+        */
+        int optval = 1;
+        setsockopt(clientSocket, SOL_SOCKET, SO_REUSEADDR, (const void *)&optval , sizeof(int));
+        while(true){
+            //MAKE RCV CALL
+            int size_of_serv_addr = sizeof(servaddr);
+            
+            if(recvfrom(clientSocket, (char*)buff, MAX_MESSAGE_SIZE, 0, (sockaddr*)&servaddr, (socklen_t*)&size_of_serv_addr) < 0){
+                cout << "Error receiving." << endl;
+                exit(-1);
+            }else{
+                cout << "Message receieved\n";
+                host = (unsigned char*)readDIGResponse(buff, (unsigned char*)serverIP);
+                break;
+            }
+        
+        }
+
+    }else if(DEBUG){
+        host = (unsigned char*)argv[2];
+        serverIP = argv[3];
+    }else{
+        host = (unsigned char*)argv[1];
+        serverIP = argv[2];
+    }
+        
+    //dns socket	
+    dnsSocket = -1;
+    if( (dnsSocket = socket(AF_INET, SOCK_DGRAM, 0)) < 0){
         cout << "Failed to create listening socket " << strerror(errno) << endl;
         exit(-1);
     }
@@ -69,68 +128,24 @@ int main(int argc, char **argv) {
     if(!answerFound){
         cout << "No Answers Found!";
     }
-    close(clientSocket);
-    /**************************************************************************
-    * HERE DOWN USE FOR DAEMONIZE REFERENCE
-    ***************************************************************************/
-    // ********************************************************************
-	// * Binding configures the socket with the parameters we have
-	// * specified in the servaddr structure.  This step is implicit in
-	// * the connect() call, but must be explicitly listed for servers.
-	// ********************************************************************
-	//if (DEBUG)
-	//	cout << "Process has bound fd " << clientSocket << " to port " << DNS_PORT << endl;
-     
-    /*if (bind(listenfd, (sockaddr *) &servaddr, sizeof(servaddr)) < 0) {
-        cout << "bind() failed: " << strerror(errno) << endl;
-        exit(-1);
-    }*/
-    
-    //int
-    /*
-	// ********************************************************************
-    // * Setting the socket to the listening state is the second step
-	// * needed to being accepting connections.  This creates a que for
-	// * connections and starts the kernel listening for connections.
-    // ********************************************************************
-	if (DEBUG)
-		cout << "We are now listening for new connections" << endl;
-    
-    int listenq = 1;
-    if (listen(listenfd, listenq) < 0) {
-        cout << "listen() failed: " << strerror(errno) << endl;
-        exit(-1);
-    }
-
-	// ********************************************************************
-    // * The accept call will sleep, waiting for a connection.  When 
-	// * a connection request comes in the accept() call creates a NEW
-	// * socket with a new fd that will be used for the communication.
-    // ********************************************************************
-	set<pthread_t*> threads;
-	while (1) {
-		if (DEBUG)
-			cout << "Calling accept() in master thread." << endl;
-		int connfd = -1;
-        if ((connfd = accept(listenfd, (sockaddr *) NULL, NULL)) < 0) {
-            cout << "accept() failed: " << strerror(errno) << endl;
+    close(dnsSocket);
+    //printAnswers(answers);  
+    if(SERVER_MODE){
+        int sizeOfMessage;
+        replyToDIG( sizeOfMessage); 
+         
+        //MAKE SEND CALL
+        if(sendto(clientSocket, (char*)digBuffer, sizeOfMessage, 0, (sockaddr*)&servaddr, sizeof(servaddr)) < 0){
+            cout << "Error sending daemonize" << endl;
             exit(-1);
         }
-	
-		if (DEBUG)
-			cout << "Spawing new thread to handled connect on fd=" << connfd << endl;
-
-		pthread_t* threadID = new pthread_t;
-		pthread_create(threadID, NULL, processRequest, (void *)connfd);
-		threads.insert(threadID);
-	}
-    close(listenfd);
-    */
+        close(clientSocket);
+    }
+ 
 }
 
 //make a dns query to a server
 void makeDNSQuery(unsigned char* host, const char* serverIP){
-    //if(badResponse) return; 
     if(DEBUG){
         cout << "/////////////////////////////////////\n";
         cout << "Querying " << serverIP << " for " << host << endl;
@@ -142,7 +157,7 @@ void makeDNSQuery(unsigned char* host, const char* serverIP){
     //dns struct
     DNSHeader* dnsHeader = (DNSHeader*)&buffer;
     //populate dns header info
-    fillDNSHeader(dnsHeader);
+    fillDNSHeaderReq(dnsHeader);
     //move to buffer spot after header info
     questionName = (unsigned char*)&buffer[sizeof(DNSHeader)];
     writeHostToDNSBuffer(host, questionName);
@@ -165,14 +180,14 @@ void makeDNSQuery(unsigned char* host, const char* serverIP){
     servaddr.sin_port = htons(DNS_PORT);
     
     //MAKE SEND CALL
-    if(sendto(clientSocket, (char*)buffer, sizeof(DNSHeader) + sizeof(DNSQueryInfo)  + strlen((const char*)questionName) + NULL_CHAR_SIZE, 0, (sockaddr*)&servaddr, sizeof(servaddr)) < 0){
+    if(sendto(dnsSocket, (char*)buffer, sizeof(DNSHeader) + sizeof(DNSQueryInfo)  + strlen((const char*)questionName) + NULL_CHAR_SIZE, 0, (sockaddr*)&servaddr, sizeof(servaddr)) < 0){
         cout << "Error sending" << endl;
         exit(-1);
     }
     
     //MAKE RCV CALL
     int size_of_serv_addr = sizeof(servaddr);
-    if(recvfrom(clientSocket, (char*)buffer, MAX_MESSAGE_SIZE, 0, (sockaddr*)&servaddr, (socklen_t*)&size_of_serv_addr) < 0){
+    if(recvfrom(dnsSocket, (char*)buffer, MAX_MESSAGE_SIZE, 0, (sockaddr*)&servaddr, (socklen_t*)&size_of_serv_addr) < 0){
         cout << "Error receiving." << endl;
         exit(-1);
     }
@@ -184,13 +199,13 @@ void makeDNSQuery(unsigned char* host, const char* serverIP){
 }
 
 //fill in header
-void fillDNSHeader( DNSHeader* header ){
+void fillDNSHeaderReq( DNSHeader* header){
     header->id = (unsigned short)htons(getpid());
     header->qr = 0; 
-    header->opcode = 0; //standard query
+    header->opcode = 0; //0: standard query 1:standard response
     header->aa = 0; //not authoritative
     header->tc = 0; //not truncated
-    header->rd = 1; //recursion Desired
+    header->rd = 0; //recursion Desired
     header->ra = 0; //recursion not available 
     header->z = 0;
     header->rcode = 0;
@@ -199,6 +214,22 @@ void fillDNSHeader( DNSHeader* header ){
     header->nsCount = 0;
     header->arCount = 0;
 }
+void fillDNSHeaderResponse( DNSHeader* header, unsigned short answerCount ){
+    header->id = (unsigned short)htons(getpid());
+    header->qr = 1; 
+    header->opcode = 0; //0: standard query 
+    header->aa = 0; //not authoritative
+    header->tc = 0; //not truncated
+    header->rd = 1; //recursion Desired
+    header->ra = 0; //recursion not available 
+    header->z = 0;
+    header->rcode = 0;
+    header->qdCount = htons(1); 
+    header->anCount = htons(answerCount);
+    header->nsCount = 0;
+    header->arCount = 0;
+}
+
 
 //writes in query name to buffer in correct format ie 7imagine5mines3edu
 void writeHostToDNSBuffer(unsigned char* host, unsigned char* buffer){
@@ -208,7 +239,7 @@ void writeHostToDNSBuffer(unsigned char* host, unsigned char* buffer){
     for(int i = 0; i < length + 1; i++){
         if(host[i] == '.' || i == length ){
            //converts int to char
-           *buffer++ = counter; 
+           *buffer++ = counter;
            for( int j = pos; j < i; j++){
                *buffer++ = host[j]; 
            }
@@ -251,12 +282,10 @@ void readDNSResponse(unsigned char* buffer, unsigned char* questionName){
     checkForBadResponse(header);
     if(badResponse) return;
 
-    vector<DNSResourceRecord> answers, auth, addl;
-    cout << ntohs(header->qdCount) << " questions\n";
+    vector<DNSResourceRecord> auth, addl;
     //IF A RETURN, else RECURSIVELY SEARCH
     if( ntohs(header->anCount) > 0 ){
         answerFound = true;
-        cout <<  ntohs(header->anCount) << " ANSWERS\n";
         for(int i = 0; i < ntohs(header->anCount); i++){
             DNSResourceRecord record;
             parser = populateResourceRecord(buffer, parser, record);
@@ -268,7 +297,6 @@ void readDNSResponse(unsigned char* buffer, unsigned char* questionName){
         printAnswers(answers);
 
     }else if( ntohs(header->nsCount) > 0 ) { 
-        cout << ntohs(header->nsCount) <<  " NS\n";
         for(int i = 0; i < ntohs(header->nsCount); i++){
             DNSResourceRecord record;
             parser = populateResourceRecord(buffer, parser, record);
@@ -278,7 +306,6 @@ void readDNSResponse(unsigned char* buffer, unsigned char* questionName){
         
         }
 
-        cout << ntohs(header->arCount) << " addln\n";
         for(int i = 0; i < ntohs(header->arCount); i++){
             DNSResourceRecord record;
             parser = populateResourceRecord(buffer, parser, record);
@@ -311,10 +338,8 @@ unsigned char* populateResourceRecord(unsigned char* buffer, unsigned char* pars
 
     record.name=readName(buffer, parser, &octetsMoved);
     parser += octetsMoved;
-
-    record.resourceInfo=(DNSResourceInfo*)parser;
+    record.resourceInfo = (DNSResourceInfo*)parser;
     parser += sizeof(DNSResourceInfo);
-    //cout << record.name;
     //a type 
     if(ntohs(record.resourceInfo->type) == 1 ){
         record.rdata = (unsigned char*)malloc(ntohs(record.resourceInfo->rdLength));
@@ -329,16 +354,12 @@ unsigned char* populateResourceRecord(unsigned char* buffer, unsigned char* pars
         long *p;
         p=(long*)record.rdata;
         a.sin_addr.s_addr=(*p); //working without ntohl
-        printf(" has IPv4 address : %s\n",inet_ntoa(a.sin_addr));
 
     }
     else if(ntohs(record.resourceInfo->type) == 5 || ntohs(record.resourceInfo->type) == 2){//cname or ns
         record.rdata=readName(buffer, parser, &octetsMoved);
         parser += octetsMoved;
-        if( ntohs(record.resourceInfo->type) == 5); //cout << " CName " << record.rdata << endl;
-        else if(ntohs(record.resourceInfo->type) == 2) cout << " NSName " << record.rdata << endl;
     }else{
-        cout << "IPv6 or unknown record type";
         record.rdata = (unsigned char*)malloc(ntohs(record.resourceInfo->rdLength));
         for(int i = 0; i < ntohs(record.resourceInfo->rdLength); i++){
             record.rdata[i]=parser[i];
@@ -350,7 +371,6 @@ unsigned char* populateResourceRecord(unsigned char* buffer, unsigned char* pars
         long *p;
         p=(long*)record.rdata;
         a.sin_addr.s_addr=(*p); //working without ntohl
-        printf(" has IPv6 or other address : %s\n",inet_ntoa(a.sin_addr));
     }
     return parser;
 }
@@ -390,7 +410,7 @@ unsigned char* readName(unsigned char* buffer, unsigned char* parser, int* octet
 
 //prints answers
 void printAnswers(vector<DNSResourceRecord> &answers){
-    cout << "ANSWERS FOR  " << host <<  " ARE...." << endl;
+    cout << "ANSWERS FOR  " << host <<  " ARE:" << endl;
     for(int i = 0; i < answers.size(); i++){
         if(ntohs(answers[i].resourceInfo->type) == 1){
             struct sockaddr_in a;
@@ -420,7 +440,6 @@ void recursivelySearch(vector<DNSResourceRecord> &auth, vector<DNSResourceRecord
         //check if already searched ip
         if( serversSearched.find(serverIP) == serversSearched.end() ) {
             if(badResponse) return;
-            cout << "------------//" <<(addl[i].name)<<"//-------------------------\n";  
             serversSearched.insert(serverIP); 
             makeDNSQuery( host,  serverIP);
         }
@@ -429,3 +448,70 @@ void recursivelySearch(vector<DNSResourceRecord> &auth, vector<DNSResourceRecord
 
 }
 
+//read dns response from buffer
+char* readDIGResponse(unsigned char* buffer, unsigned char* serverIP){
+    DNSHeader* header;
+    DNSQuery* query;
+    unsigned char* parser;
+    int temp = 0;
+    header = (DNSHeader*)buffer;
+    digID = header->id;
+    parser = &buffer[ sizeof(DNSHeader) ];
+    char* question = (char*)readName(buffer, parser, &temp);
+    return question;
+}
+//send response to DIG
+void replyToDIG(int &sizeOfMessage){
+    //unsigned char*pos = buffer;
+    unsigned char* questionName;
+    int sizeOfAnswers = 0;
+    //dns struct
+    DNSHeader* dnsHeader = (DNSHeader*)&digBuffer;
+    //populate dns header info
+    fillDNSHeaderResponse(dnsHeader, answers.size());
+    dnsHeader->id = digID;
+    //move to buffer spot after header info
+    questionName = (unsigned char*)&digBuffer[sizeof(DNSHeader)];
+    writeHostToDNSBuffer(host, questionName); 
+    DNSQueryInfo* queryInfo = (DNSQueryInfo*)&digBuffer[sizeof(DNSHeader) + strlen((const char*)questionName) + NULL_CHAR_SIZE ]; //+1 for null char
+    //populate query field 
+    queryInfo->qtype = htons(1); //A type
+    queryInfo->qclass = htons(1); //1 for internet
+    int position =  sizeof(DNSHeader) + strlen((const char*)questionName) + NULL_CHAR_SIZE + sizeof(DNSQueryInfo);
+    DNSResourceRecord* record =(DNSResourceRecord*)&digBuffer[ position  ];
+    for(int i = 0; i < answers.size(); i++){
+        unsigned char* rec = (unsigned char*)&digBuffer[ position ];
+        writeHostToDNSBuffer(answers[i].name, rec); 
+        position +=  strlen((const char*)rec) + NULL_CHAR_SIZE;
+        digBuffer[position] = 0x00;
+        position += NULL_CHAR_SIZE;
+        DNSResourceInfo* recInfo = (DNSResourceInfo*)&digBuffer[ position ];
+        recInfo->type = answers[i].resourceInfo->type;
+        position += sizeof(DNSResourceInfo);
+        int rdataSize;
+        cout << "\n " << ntohs(answers[0].resourceInfo->type)  << " ^^^ bufh " << ntohs(recInfo->rdLength) << "\n"; 
+        if(ntohs(recInfo->type) == 1){
+            cout <<"atype"; 
+            unsigned char* recrdata = (unsigned char*)&digBuffer[position];
+            for(int i = 0; i < ntohs(recInfo->rdLength); i++){
+                recrdata[i]=answers[i].rdata[i];
+
+            }
+            recrdata[ntohs(recInfo->rdLength)] = 0x00;
+            position+=ntohs(recInfo->rdLength);
+            rdataSize += ntohs(recInfo->rdLength);
+        }else if( ntohs(recInfo -> type) == 5){
+            unsigned char* recrdata = (unsigned char*)&digBuffer[position];  
+            writeHostToDNSBuffer(answers[i].rdata, recrdata);
+            position += strlen((const char*)recrdata) + NULL_CHAR_SIZE;
+            rdataSize =  strlen((const char*)recrdata) + NULL_CHAR_SIZE;
+        }
+        if(i != answers.size() - 1) position += 1;
+                
+        int sizeOfAnswer;
+        sizeOfAnswer = strlen((const char*)rec) + NULL_CHAR_SIZE + rdataSize + sizeof(DNSResourceInfo);
+        sizeOfAnswers += sizeOfAnswer;
+    }
+    sizeOfMessage = sizeof(DNSHeader) + sizeof(DNSQueryInfo)  + strlen((const char*)questionName) + NULL_CHAR_SIZE + sizeOfAnswers;
+
+}
