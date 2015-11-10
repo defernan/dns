@@ -136,7 +136,7 @@ int main(int argc, char **argv) {
         //replyToDIG( sizeOfMessage); 
          
         //MAKE SEND CALL
-        if(sendto(clientSocket, (char*)digBuffer, sizeOfMessage, 0, (sockaddr*)&servaddr, sizeof(servaddr)) < 0){
+        if(sendto(clientSocket, (char*)digBuffer, MAX_MESSAGE_SIZE, 0, (sockaddr*)&servaddr, sizeof(servaddr)) < 0){
             cout << "Error sending daemonize" << endl;
             exit(-1);
         }
